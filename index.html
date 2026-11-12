@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101827"><title>IP Finder Pro</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#eef4ff;font-family:Arial,sans-serif}
+header{padding:24px 18px 14px;background:linear-gradient(135deg,#14243d,#101827)}
+h1{margin:0;font-size:27px}header p{color:#aebbd0;margin:8px 0 0;font-size:13px}
+main{padding:16px;max-width:720px;margin:auto}.tabs{display:flex;gap:8px;margin-bottom:14px}
+button{border:0;border-radius:12px;padding:12px 15px;font-weight:700;cursor:pointer}
+.tab{background:#1d2a40;color:#c9d7ea;flex:1}.tab.active,.primary{background:#3182f6;color:white}
+input{width:100%;padding:15px;border-radius:12px;border:1px solid #34445d;background:#162238;color:white;font-size:16px;margin:8px 0}
+.actions{display:flex;gap:8px}.actions button{flex:1}.secondary{background:#24344e;color:#e5efff}
+#status{color:#9db0ca;font-size:13px;min-height:20px;margin:10px 2px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.card{background:#17243a;border:1px solid #263750;border-radius:14px;padding:14px;min-width:0}
+.k{color:#91a6c4;font-size:11px;text-transform:uppercase;letter-spacing:.7px}.v{font-size:16px;font-weight:700;margin-top:7px;overflow-wrap:anywhere}
+.wide{grid-column:1/-1}a{color:#78b5ff}#result{display:none}.history-item{padding:12px 4px;border-bottom:1px solid #2b3b53;display:flex;justify-content:space-between;gap:8px}
+small{color:#a9bad1}.muted{color:#9db0ca;font-size:13px}.hidden{display:none}
+</style></head>
+<body>
+<header><h1>🌐 IP Finder Pro</h1><p>IP address, network details and approximate location</p></header>
+<main>
+<div class="tabs"><button class="tab active" id="searchTab" onclick="showPage('search')">Lookup</button><button class="tab" id="historyTab" onclick="showPage('history')">History</button></div>
+<section id="searchPage">
+<div class="card">
+<div class="k">Enter an IP address (leave blank for your own IP)</div>
+<input id="ip" placeholder="Example: 8.8.8.8" autocapitalize="off">
+<div class="actions"><button class="primary" onclick="lookup()">Search IP</button><button class="secondary" onclick="document.getElementById('ip').value='';lookup()">My IP</button></div>
+<div id="status">Ready. Choose My IP or enter an address.</div>
+</div>
+<div id="result">
+<div class="grid" id="details"></div>
+</div>
+</section>
+<section id="historyPage" class="hidden">
+<div class="card"><div class="actions"><b style="flex:1">Previous searches</b><button class="secondary" onclick="clearHistory()">Clear all</button></div><div id="historyList" class="muted" style="margin-top:10px">No searches yet.</div></div>
+</section>
+</main>
+<script>
+let pending={};
+function showPage(p){
+ document.getElementById('searchPage').classList.toggle('hidden',p!=='search');
+ document.getElementById('historyPage').classList.toggle('hidden',p!=='history');
+ document.getElementById('searchTab').classList.toggle('active',p==='search');
+ document.getElementById('historyTab').classList.toggle('active',p==='history');
+ if(p==='history') renderHistory();
+}
+function lookup(){
+ const ip=document.getElementById('ip').value.trim();
+ const id='cb'+Date.now()+Math.random().toString(16).slice(2);
+ document.getElementById('status').textContent='Looking up IP information…';
+ document.getElementById('result').style.display='none';
+ pending[id]=true;
+ if(window.AndroidBridge) AndroidBridge.lookup(ip,id);
+ else document.getElementById('status').textContent='Open this app in the Android APK.';
+}
+window.onNativeLookup=function(id,raw){
+ if(!pending[id])return; delete pending[id];
+ let d;try{d=JSON.parse(raw)}catch(e){document.getElementById('status').textContent='Could not read API response.';return}
+ if(!d.success){document.getElementById('status').textContent=d.error||'Lookup failed.';return}
+ const g=d.geolocation||{},n=d.network_information||{},m=d.map||{},t=d.timezone_information||{},info=d.ip_information||{};
+ const rows=[
+ ['IP Address',info.ip_address],['IP Type',info.ip_type],['Country',(g.country_flag?.emoji||'')+' '+(g.country||'')],['City',g.city],['Region',g.region],['Postal Code',g.postal_code],['ISP',n.isp],['Organization',n.organization],['ASN',n.asn],['Domain',n.domain],['Timezone',t.timezone],['Coordinates',m.latitude+', '+m.longitude]
+ ];
+ document.getElementById('details').innerHTML=rows.map(x=>`<div class="card"><div class="k">${esc(x[0])}</div><div class="v">${esc(x[1]??'Not available')}</div></div>`).join('')+
+ `<div class="card wide"><div class="k">Map</div><div class="v"><a href="${esc(m.google_maps||'#')}" onclick="return openMap('${esc(m.google_maps||'')}')">Open location in Google Maps ↗</a></div><small>IP geolocation is approximate and does not reveal an exact address.</small></div>`;
+ document.getElementById('result').style.display='block';
+ document.getElementById('status').textContent='Lookup completed for '+(info.ip_address||'IP')+'.';
+ const hist=JSON.parse(localStorage.getItem('ipHistory')||'[]');
+ hist.unshift({ip:info.ip_address||'',country:g.country||'',city:g.city||'',time:new Date().toLocaleString()});
+ localStorage.setItem('ipHistory',JSON.stringify(hist.slice(0,50)));
+};
+function openMap(url){if(url&&window.AndroidBridge){location.href=url;return false}return true}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function renderHistory(){
+ const h=JSON.parse(localStorage.getItem('ipHistory')||'[]');
+ document.getElementById('historyList').innerHTML=h.length?h.map(x=>`<div class="history-item"><span><b>${esc(x.ip)}</b><br><small>${esc(x.country)} · ${esc(x.city)}</small></span><small>${esc(x.time)}</small></div>`).join(''):'No searches yet.';
+}
+function clearHistory(){localStorage.removeItem('ipHistory');renderHistory()}
+</script></body></html>
